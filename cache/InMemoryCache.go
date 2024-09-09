@@ -94,5 +94,8 @@ func (c *InMemoryCache[T]) Print() {
 }
 
 func (c *InMemoryCache[T]) Size() int {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
 	return len(c.cache)
 }
