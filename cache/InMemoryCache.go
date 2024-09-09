@@ -2,11 +2,14 @@ package cache
 
 import (
 	"fmt"
+	"sync"
+	"time"
 )
 
 type InMemoryCache[T any] struct {
 	cache map[string]cachedItem[T]
 	ttl   int64
+	mutex sync.RWMutex
 }
 
 func NewInMemoryCache[T any](ttl int64) *InMemoryCache[T] {
@@ -14,13 +17,21 @@ func NewInMemoryCache[T any](ttl int64) *InMemoryCache[T] {
 		ttl = 60
 	}
 
-	return &InMemoryCache[T]{
+	cache := InMemoryCache[T]{
 		cache: make(map[string]cachedItem[T]),
 		ttl:   ttl,
+		mutex: sync.RWMutex{},
 	}
+
+	go cache.startEviction()
+
+	return &cache
 }
 
 func (c *InMemoryCache[T]) Set(key string, item T) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	if len(key) == 0 {
 		return
 	}
@@ -30,6 +41,9 @@ func (c *InMemoryCache[T]) Set(key string, item T) {
 }
 
 func (c *InMemoryCache[T]) Get(key string) (T, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+
 	var zero T
 	if len(key) == 0 {
 		return zero, false
@@ -44,11 +58,29 @@ func (c *InMemoryCache[T]) Get(key string) (T, bool) {
 }
 
 func (c *InMemoryCache[T]) Delete(key string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	if len(key) == 0 {
 		return
 	}
 
 	delete(c.cache, key)
+}
+
+func (c *InMemoryCache[T]) startEviction() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.mutex.Lock()
+		for key, item := range c.cache {
+			if item.isExpired() {
+				delete(c.cache, key)
+			}
+		}
+		c.mutex.Unlock()
+	}
 }
 
 func (c *InMemoryCache[T]) Print() {
@@ -59,4 +91,8 @@ func (c *InMemoryCache[T]) Print() {
 		fmt.Println(key, value.getItem())
 	}
 	fmt.Println()
+}
+
+func (c *InMemoryCache[T]) Size() int {
+	return len(c.cache)
 }
